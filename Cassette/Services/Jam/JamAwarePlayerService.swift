@@ -7,7 +7,8 @@ import Foundation
 import SwiftSonic
 
 /// The `PlayerServiceProtocol` the UI talks to. Forwards everything to `PlayerService`, except that
-/// while this device is a Jam guest, "Add to Queue" and "Play Next" go to the host's queue instead.
+/// while this device is a Jam guest, "Add to Queue", "Play Next" and tapping a song to play go to
+/// the host instead.
 ///
 /// Every queue action in the app already goes through these two calls, so routing them here makes
 /// all of them Jam-aware without touching a view. `PlayerService` stays the single source of truth
@@ -26,6 +27,10 @@ nonisolated final class JamAwarePlayerService: PlayerServiceProtocol {
 
     private func routed(_ songs: [DisplayableSong], _ placement: JamPlacement) async -> Bool {
         await jam.routeEnqueue(songs, placement: placement)
+    }
+
+    private func routedPlay(_ song: DisplayableSong) async -> Bool {
+        await jam.routePlay(song)
     }
 
     // MARK: - Routed while a guest
@@ -53,9 +58,15 @@ nonisolated final class JamAwarePlayerService: PlayerServiceProtocol {
         await playNext([song])
     }
 
+    /// A guest's tap on a song goes to the host: played now when the host allows it, queued
+    /// otherwise. Only the tapped song goes, not the album or list around it.
+    func play(tracks: [DisplayableSong], startIndex: Int) async throws {
+        if tracks.indices.contains(startIndex), await routedPlay(tracks[startIndex]) { return }
+        try await base.play(tracks: tracks, startIndex: startIndex)
+    }
+
     // MARK: - Forwarded
 
-    func play(tracks: [DisplayableSong], startIndex: Int) async throws { try await base.play(tracks: tracks, startIndex: startIndex) }
     func playShuffled(tracks: [DisplayableSong]) async throws { try await base.playShuffled(tracks: tracks) }
     func resume() async { await base.resume() }
     func pause() async { await base.pause() }

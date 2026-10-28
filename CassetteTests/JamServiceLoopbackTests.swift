@@ -20,6 +20,8 @@ private final class RecordingPlayer: PlayerServiceProtocol {
     private(set) var playedNext: [String] = []
     private(set) var appended: [String] = []
     private(set) var toggles = 0
+    private(set) var skips = 0
+    private(set) var playedFrom: Int?
 
     init(state: PlayerState) { self.state = state }
 
@@ -33,13 +35,27 @@ private final class RecordingPlayer: PlayerServiceProtocol {
         state.queue.append(contentsOf: songs)
     }
     func togglePlayPause() async { toggles += 1 }
+    func skipToNext() async throws {
+        skips += 1
+        state.currentIndex += 1
+        state.currentTrack = state.queue[state.currentIndex]
+    }
+    func moveInQueue(fromIndex: Int, toIndex: Int) async {
+        let song = state.queue.remove(at: fromIndex)
+        state.queue.insert(song, at: toIndex > fromIndex ? toIndex - 1 : toIndex)
+    }
+    func removeFromQueue(at index: Int) async { state.queue.remove(at: index) }
+    func play(tracks: [DisplayableSong], startIndex: Int) async throws {
+        playedFrom = startIndex
+        state.queue = tracks
+        state.currentIndex = startIndex
+        state.currentTrack = tracks[startIndex]
+    }
 
-    func play(tracks: [DisplayableSong], startIndex: Int) async throws {}
     func playShuffled(tracks: [DisplayableSong]) async throws {}
     func resume() async {}
     func pause() async {}
     func stop() async {}
-    func skipToNext() async throws {}
     func skipToPrevious() async throws {}
     func seek(to position: TimeInterval) async {}
     func setRepeatMode(_ mode: RepeatMode) async {}
@@ -47,8 +63,6 @@ private final class RecordingPlayer: PlayerServiceProtocol {
     func appendToQueue(_ tracks: [DisplayableSong]) async {}
     func playNext(_ song: DisplayableSong) async { await playNext([song]) }
     func addToQueue(_ song: DisplayableSong) async { await addToQueue([song]) }
-    func removeFromQueue(at index: Int) async {}
-    func moveInQueue(fromIndex: Int, toIndex: Int) async {}
     func restoreSession() async {}
     func handleNetworkRestored() async {}
     func playRadio(_ station: InternetRadioStation) async throws {}
@@ -96,7 +110,7 @@ private func until(_ condition: @escaping @MainActor () -> Bool) async {
 @MainActor
 private func makeHost() -> (JamService, RecordingPlayer) {
     let state = PlayerState()
-    state.queue = [song("now"), song("later")]
+    state.queue = [song("now"), song("later"), song("last")]
     state.currentIndex = 0
     state.currentTrack = state.queue[0]
     state.playbackState = .playing
@@ -154,7 +168,7 @@ struct JamServiceLoopbackTests {
         await until { hostPlayer.appended == ["a", "b"] }
 
         // The guest sees the new queue, with its own name on the tracks it added.
-        await until { guest.snapshot?.upNext.map(\.song.id) == ["next", "later", "a", "b"] }
+        await until { guest.snapshot?.upNext.map(\.song.id) == ["next", "later", "last", "a", "b"] }
         let guestName = try #require(host.guestNames.first)
         #expect(guest.snapshot?.upNext.first?.addedBy == guestName)
         #expect(guest.snapshot?.upNext[1].addedBy == nil)
@@ -208,4 +222,77 @@ struct JamServiceLoopbackTests {
         // Not a guest any more: queue actions stay local.
         #expect(guest.routeEnqueue([song("x")], placement: .end) == false)
     }
+
+    @Test func guestsReorderAndRemoveWithoutPermission() async throws {
+        let (host, hostPlayer) = makeHost()
+        let guest = makeGuest()
+        defer { guest.end(); host.end() }
+        try await join(guest, host)
+        #expect(host.guestsCanControl == false)
+
+        // Up Next is ["later", "last"]: move "last" to the top, then remove "later".
+        guest.moveUpNext(from: 1, to: 0)
+        await until { hostPlayer.state.queue.map(\.id) == ["now", "last", "later"] }
+        guest.removeUpNext(at: 1)
+        await until { hostPlayer.state.queue.map(\.id) == ["now", "last"] }
+        await until { guest.snapshot?.upNext.map(\.song.id) == ["last"] }
+    }
+
+    @Test func aStaleRowIsNotTouched() async throws {
+        let (host, hostPlayer) = makeHost()
+        let guest = makeGuest()
+        defer { guest.end(); host.end() }
+        try await join(guest, host)
+
+        // The host reorders before the guest's snapshot catches up; the guest still sees "later" first.
+        await hostPlayer.moveInQueue(fromIndex: 2, toIndex: 1)
+        guest.removeUpNext(at: 0)
+        // The host refuses (row 0 is now "last") and resends the real queue.
+        await until { guest.lastNotice == "The queue changed. Try again." }
+        await until { guest.snapshot?.upNext.map(\.song.id) == ["last", "later"] }
+        #expect(hostPlayer.state.queue.map(\.id) == ["now", "last", "later"])
+    }
+
+    @Test func tappingASongPlaysItNowOnlyWhenTheHostAllows() async throws {
+        let (host, hostPlayer) = makeHost()
+        let guest = makeGuest()
+        defer { guest.end(); host.end() }
+        try await join(guest, host)
+        let router = JamAwarePlayerService(base: RecordingPlayer(state: PlayerState()), jam: guest)
+
+        // Not allowed: the tapped song joins the end of the queue and nothing is skipped.
+        try await router.play(tracks: [song("x"), song("tapped")], startIndex: 1)
+        await until { hostPlayer.appended == ["tapped"] }
+        #expect(hostPlayer.skips == 0)
+
+        // Allowed: it goes in next and the host skips to it.
+        host.guestsCanControl = true
+        await until { guest.canControl }
+        try await router.play(tracks: [song("now2")], startIndex: 0)
+        await until { hostPlayer.skips == 1 }
+        #expect(hostPlayer.playedNext == ["now2"])
+        #expect(hostPlayer.state.currentTrack?.id == "now2")
+    }
+
+    @Test func jumpingToARowNeedsPermission() async throws {
+        let (host, hostPlayer) = makeHost()
+        let guest = makeGuest()
+        defer { guest.end(); host.end() }
+        try await join(guest, host)
+
+        guest.jumpToUpNext(1)   // dropped on the guest side: not allowed
+        host.guestsCanControl = true
+        await until { guest.canControl }
+        guest.jumpToUpNext(1)
+        await until { hostPlayer.playedFrom == 2 }
+        #expect(hostPlayer.state.currentTrack?.id == "last")
+    }
+}
+
+@MainActor
+private func join(_ guest: JamService, _ host: JamService) async throws {
+    host.startHosting()
+    await until { host.port != nil }
+    guest.join(loopback(try #require(host.port)), code: host.joinCode)
+    await until { guest.role == .guest }
 }

@@ -154,7 +154,11 @@ private struct JamSheetContent: View {
         }
 
         Section {
-            Toggle("Guests can play, pause and skip", isOn: $jam.guestsCanControl)
+            Toggle("Guests can skip and play now", isOn: $jam.guestsCanControl)
+        } footer: {
+            Text(jam.guestsCanControl
+                 ? "Guests can skip, play and pause, and start a song right away."
+                 : "Guests can add songs and reorder or remove what's up next. Skipping and playing now stay with you.")
         }
 
         Section("In this Jam") {
@@ -200,18 +204,41 @@ private struct JamSheetContent: View {
             } header: {
                 Text("Playing on \(snapshot.hostName)")
             } footer: {
-                Text("Use Add to Queue or Play Next anywhere in Cassette to add songs to this Jam.")
+                Text(snapshot.guestsCanControl
+                     ? "Tap a song anywhere in Cassette to play it now, or use Add to Queue and Play Next."
+                     : "Add to Queue, Play Next or tap a song anywhere in Cassette to add it to this Jam.")
             }
 
-            Section("Up Next") {
+            Section {
                 if snapshot.upNext.isEmpty {
                     Text("Nothing queued yet.")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(Array(snapshot.upNext.enumerated()), id: \.offset) { _, item in
+                    ForEach(Array(snapshot.upNext.enumerated()), id: \.offset) { offset, item in
                         JamItemRow(item: item)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                guard jam.canControl else { return }
+                                HapticFeedback.medium.trigger()
+                                jam.jumpToUpNext(offset)
+                            }
+                    }
+                    .onMove { source, destination in
+                        guard let first = source.first else { return }
+                        HapticFeedback.light.trigger()
+                        jam.moveUpNext(from: first, to: destination)
+                    }
+                    .onDelete { offsets in
+                        guard let first = offsets.first else { return }
+                        jam.removeUpNext(at: first)
                     }
                 }
+            } header: {
+                Text("Up Next")
+            } footer: {
+                Text(snapshot.guestsCanControl
+                     ? "Drag to reorder, swipe to remove, tap to play now."
+                     : "Drag to reorder, swipe to remove.")
             }
 
             if !snapshot.guests.isEmpty {

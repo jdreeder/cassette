@@ -39,7 +39,8 @@ final class JamService {
     private(set) var joinCode = ""
     /// Host: names of connected guests.
     private(set) var guestNames: [String] = []
-    /// Host: whether guests may play/pause and skip.
+    /// Host: whether guests may skip, play/pause and play songs now. Adding to, reordering and
+    /// removing from Up Next is always open to guests.
     var guestsCanControl = false {
         didSet { if role == .hosting { broadcastIfChanged(force: true) } }
     }
@@ -49,6 +50,8 @@ final class JamService {
     private(set) var snapshot: JamSnapshot?
     /// Last connection or admission error, shown in the Jam sheet.
     private(set) var lastError: String?
+    /// Guest: the host's last notice (also shown as a toast).
+    private(set) var lastNotice: String?
     /// Host: the TCP port once the listener is ready.
     private(set) var port: UInt16?
 
@@ -214,14 +217,40 @@ final class JamService {
         case .enqueue(let songIds, let placement):
             guard let name = peer.name else { return }
             enqueue(Array(songIds.prefix(JamWire.maxEnqueueBatch)), placement: placement, from: name, connection: peer.connection)
+        case .move(let from, let to, let songId):
+            guard peer.name != nil else { return }
+            guard let source = upNextIndex(from, songId, for: peer.connection), to >= 0 else { return }
+            let destination = min(playerState.currentIndex + 1 + to, playerState.queue.count)
+            Task {
+                await playerService.moveInQueue(fromIndex: source, toIndex: destination)
+                broadcastIfChanged(force: true)
+            }
+        case .remove(let index, let songId):
+            guard peer.name != nil, let target = upNextIndex(index, songId, for: peer.connection) else { return }
+            Task {
+                await playerService.removeFromQueue(at: target)
+                broadcastIfChanged(force: true)
+            }
+        case .playNow(let songIds):
+            guard let name = peer.name, allowsControl(peer.connection) else { return }
+            playNow(Array(songIds.prefix(JamWire.maxEnqueueBatch)), from: name, connection: peer.connection)
+        case .jump(let index, let songId):
+            guard peer.name != nil, allowsControl(peer.connection),
+                  let target = upNextIndex(index, songId, for: peer.connection) else { return }
+            let queue = playerState.queue
+            Task {
+                try? await playerService.play(tracks: queue, startIndex: target)
+                broadcastIfChanged(force: true)
+            }
         case .control(let command):
-            guard peer.name != nil, guestsCanControl else { return }
+            guard peer.name != nil, allowsControl(peer.connection) else { return }
             Task {
                 switch command {
                 case .togglePlayPause: await playerService.togglePlayPause()
                 case .next: try? await playerService.skipToNext()
                 case .previous: try? await playerService.skipToPrevious()
                 }
+                broadcastIfChanged(force: true)
             }
         case .welcome, .rejected, .snapshot, .enqueued, .notice:
             break
@@ -245,6 +274,45 @@ final class JamService {
             }
             let what = songs.count == 1 ? "“\(songs[0].title)”" : "\(songs.count) songs"
             toastService.showConfirmation("\(name) added \(what)", coverArtId: songs.first?.coverArtId)
+            send(.enqueued(count: songs.count), to: connection)
+            broadcastIfChanged(force: true)
+        }
+    }
+
+    /// Tells the guest when the host hasn't allowed skipping and playing now.
+    private func allowsControl(_ connection: NWConnection) -> Bool {
+        if !guestsCanControl {
+            send(.notice("\(ownName) hasn't turned on skipping and Play Now for guests."), to: connection)
+        }
+        return guestsCanControl
+    }
+
+    /// Resolves a guest's Up Next row, or tells it the queue changed and resends the snapshot.
+    private func upNextIndex(_ row: Int, _ songId: String, for connection: NWConnection) -> Int? {
+        if let index = JamRoster.queueIndex(upNextIndex: row, songId: songId,
+                                            queue: playerState.queue, currentIndex: playerState.currentIndex) {
+            return index
+        }
+        send(.notice("The queue changed. Try again."), to: connection)
+        send(.snapshot(currentSnapshot()), to: connection)
+        return nil
+    }
+
+    private func playNow(_ songIds: [String], from name: String, connection: NWConnection) {
+        Task {
+            let songs = await resolveSongs(songIds)
+            guard role == .hosting else { return }
+            guard !songs.isEmpty else {
+                send(.notice("Those tracks aren't on \(ownName)'s server."), to: connection)
+                return
+            }
+            roster.recordAdded(songIds: songs.map(\.id), by: name)
+            // Play Next on an idle player starts playback itself; skipping as well would pass the
+            // song the guest picked.
+            let wasPlaying = playerState.currentTrack != nil && !playerState.queue.isEmpty && !playerState.isLiveStream
+            await playerService.playNext(songs)
+            if wasPlaying { try? await playerService.skipToNext() }
+            toastService.showConfirmation("\(name) is playing “\(songs[0].title)”", coverArtId: songs.first?.coverArtId)
             send(.enqueued(count: songs.count), to: connection)
             broadcastIfChanged(force: true)
         }
@@ -373,8 +441,9 @@ final class JamService {
                     toastService.showConfirmation(count == 1 ? "Added to \(host)'s Jam" : "\(count) songs added to \(host)'s Jam")
                 }
             case .notice(let text):
+                lastNotice = text
                 toastService.show(text)
-            case .hello, .enqueue, .control:
+            case .hello, .enqueue, .move, .remove, .playNow, .jump, .control:
                 break
             }
         }
@@ -405,9 +474,48 @@ final class JamService {
         return true
     }
 
+    /// Guest: whether the host lets guests skip and play songs now.
+    var canControl: Bool { role == .guest && snapshot?.guestsCanControl == true }
+
     func sendControl(_ command: JamCommand) {
-        guard role == .guest, snapshot?.guestsCanControl == true else { return }
+        guard canControl else { return }
         send(.control(command), to: hostConnection)
+    }
+
+    /// Guest: a song tapped to play. Plays now on the host when allowed, otherwise joins the end
+    /// of its queue. Returns false when not a guest, so the caller plays locally.
+    func routePlay(_ song: DisplayableSong) -> Bool {
+        guard role == .guest, let hostConnection else { return false }
+        if canControl {
+            send(.playNow(songIds: [song.id]), to: hostConnection)
+        } else {
+            send(.enqueue(songIds: [song.id], placement: .end), to: hostConnection)
+        }
+        return true
+    }
+
+    /// Guest: moves one Up Next row, showing the result at once; the host's next snapshot confirms it.
+    func moveUpNext(from source: Int, to destination: Int) {
+        guard role == .guest, var snapshot, snapshot.upNext.indices.contains(source),
+              destination >= 0, destination <= snapshot.upNext.count, destination != source, destination != source + 1
+        else { return }
+        let songId = snapshot.upNext[source].song.id
+        let item = snapshot.upNext.remove(at: source)
+        snapshot.upNext.insert(item, at: destination > source ? destination - 1 : destination)
+        self.snapshot = snapshot
+        send(.move(from: source, to: destination, songId: songId), to: hostConnection)
+    }
+
+    func removeUpNext(at index: Int) {
+        guard role == .guest, var snapshot, snapshot.upNext.indices.contains(index) else { return }
+        let songId = snapshot.upNext.remove(at: index).song.id
+        self.snapshot = snapshot
+        send(.remove(index: index, songId: songId), to: hostConnection)
+    }
+
+    func jumpToUpNext(_ index: Int) {
+        guard canControl, let snapshot, snapshot.upNext.indices.contains(index) else { return }
+        send(.jump(index: index, songId: snapshot.upNext[index].song.id), to: hostConnection)
     }
 
     // MARK: - Both

@@ -13,8 +13,11 @@ song ids are the same on every device.
   **Start a Jam**. Share the four-digit code that appears.
 - **Guest:** open **Settings › Jam** (or the queue's Jam button), choose the host from the
   list and type the code. Add to Queue and Play Next now send songs to the host until you leave.
-- The host can let guests play, pause and skip. Every guest sees the host's queue with the name
-  of whoever added each song.
+- **Always open to guests:** adding songs, and reordering (drag) or removing (swipe) what's up
+  next in the Jam sheet. Every guest sees the host's queue with the name of whoever added each song.
+- **Host switch "Guests can skip and play now"** (off by default): when on, guests can skip,
+  play and pause, tap an Up Next row to jump to it, and tap any song in Cassette to play it right
+  away. When off, tapping a song adds it to the end of the queue instead.
 
 Guests find the host with Bonjour (`_cassette-jam._tcp`), either on shared Wi-Fi or over
 peer-to-peer Wi-Fi when there's no shared network. That covers a party on home Wi-Fi, a hotspot
@@ -44,11 +47,19 @@ The protocol is small on purpose, so other Subsonic apps can join the same Jam.
 | host → guest | `snapshot(snapshot)` | Sent when the queue, the current track, play state or the guest list changes. |
 | guest → host | `enqueue(songIds, placement)` | `placement` is `next` or `end`. Up to 100 ids per message. |
 | host → guest | `enqueued(count)` | How many ids were queued. |
-| guest → host | `control(command)` | `togglePlayPause`, `next`, `previous`. Ignored unless the host allows it. |
+| guest → host | `move(from, to, songId)` | Reorder Up Next. `from`/`to` are `Array.move` offsets within the Up Next the guest was shown. Always allowed. |
+| guest → host | `remove(index, songId)` | Remove an Up Next row. Always allowed. |
+| guest → host | `playNow(songIds)` | Insert next and skip to it (just start playing if the host is idle). Needs permission. |
+| guest → host | `jump(index, songId)` | Jump to an Up Next row. Needs permission. |
+| guest → host | `control(command)` | `togglePlayPause`, `next`, `previous`. Needs permission. |
 | host → guest | `notice(text)` | A short message to show, e.g. when no ids could be found. |
 
 A snapshot item is `{"song": <DisplayableSong>, "addedBy": "Alex" | null}`, and `upNext` is cut
 off at 50 items.
+
+Row edits carry the `songId` the guest saw at that row. If the host's queue has moved on and the
+row holds a different song, the host does nothing, sends `notice("The queue changed. Try again.")`
+and a fresh snapshot. A message that needs permission while it's off gets a notice too.
 
 **Trust:** guests send ids only. The host looks every id up on its own server (`getSong`) and drops
 any it can't find. A guest can't add tracks that aren't in the host's library or change their
@@ -60,6 +71,5 @@ metadata. The join code stops other people in Bluetooth or Wi-Fi range from join
   the host, so a guest needs no account, like Spotify's.
 - Only the host plays audio. Synchronised listening on several devices is out of scope.
   OpenSubsonic discussion #277 and the Segue proposal (#283) cover it.
-- Guests can't remove or reorder other people's songs.
-- On a guest's phone, tapping a song still plays it on that phone. Only Add to Queue and Play Next
-  go to the host.
+- When a guest taps a song inside an album or playlist, only that song goes to the host, not the
+  rest of the list.

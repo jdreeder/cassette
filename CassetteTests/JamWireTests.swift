@@ -30,6 +30,10 @@ struct JamCodecTests {
             .snapshot(snapshot),
             .enqueue(songIds: ["a", "b"], placement: .next),
             .enqueued(count: 2),
+            .move(from: 2, to: 0, songId: "c"),
+            .remove(index: 1, songId: "b"),
+            .playNow(songIds: ["a"]),
+            .jump(index: 3, songId: "d"),
             .control(.togglePlayPause),
             .notice("Hi")
         ]
@@ -126,6 +130,14 @@ struct JamRosterTests {
                                     hasCurrentTrack: false, isPlaying: false, guestsCanControl: false)
         #expect(empty.nowPlaying == nil)
         #expect(empty.upNext.isEmpty)
+    }
+
+    @Test func upNextRowsResolveOnlyWhileTheyHoldTheSameSong() {
+        let queue = [song("a"), song("b"), song("c")]
+        #expect(JamRoster.queueIndex(upNextIndex: 1, songId: "c", queue: queue, currentIndex: 0) == 2)
+        #expect(JamRoster.queueIndex(upNextIndex: 0, songId: "c", queue: queue, currentIndex: 0) == nil)
+        #expect(JamRoster.queueIndex(upNextIndex: 2, songId: "c", queue: queue, currentIndex: 0) == nil)
+        #expect(JamRoster.queueIndex(upNextIndex: -1, songId: "a", queue: queue, currentIndex: 0) == nil)
     }
 
     @Test func joinCodesAreFourDigits() {

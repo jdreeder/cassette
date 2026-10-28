@@ -38,6 +38,8 @@ nonisolated struct JamSnapshot: Codable, Equatable, Sendable {
     var upNext: [JamItem]
     var isPlaying: Bool
     var guests: [String]
+    /// Whether guests may skip, play/pause and play songs now. Adding to and reordering the queue
+    /// is always allowed.
     var guestsCanControl: Bool
 }
 
@@ -65,7 +67,16 @@ nonisolated enum JamMessage: Codable, Equatable, Sendable {
     case enqueue(songIds: [String], placement: JamPlacement)
     /// Host → guest: how many of the requested ids were queued.
     case enqueued(count: Int)
-    /// Guest → host; ignored unless the host lets guests control playback.
+    /// Guest → host: move an Up Next row. `from`/`to` are `Array.move` offsets within the Up Next
+    /// the guest was shown; `songId` is the song it moved, so a stale view can't move another one.
+    case move(from: Int, to: Int, songId: String)
+    /// Guest → host: remove an Up Next row, checked against `songId` the same way.
+    case remove(index: Int, songId: String)
+    /// Guest → host: play these songs right away. Needs the host's permission.
+    case playNow(songIds: [String])
+    /// Guest → host: jump to an Up Next row. Needs the host's permission.
+    case jump(index: Int, songId: String)
+    /// Guest → host: play/pause and skip. Needs the host's permission.
     case control(JamCommand)
     /// Host → guest: a short human-readable message (e.g. a failed enqueue).
     case notice(String)
@@ -172,6 +183,14 @@ nonisolated struct JamRoster {
             guests: guestNames,
             guestsCanControl: guestsCanControl
         )
+    }
+
+    /// The host queue index for row `upNextIndex` of the Up Next a guest was shown, or `nil` when that
+    /// row no longer holds `songId` (the queue moved on since the guest's last snapshot).
+    static func queueIndex(upNextIndex: Int, songId: String, queue: [DisplayableSong], currentIndex: Int) -> Int? {
+        let index = currentIndex + 1 + upNextIndex
+        guard upNextIndex >= 0, queue.indices.contains(index), queue[index].id == songId else { return nil }
+        return index
     }
 
     static func cleanName(_ name: String) -> String {
