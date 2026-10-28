@@ -14,6 +14,7 @@ struct QueueView: View {
     #if os(macOS)
     @State private var draggedQueueIndex: Int?
     @State private var dropTargetGap: Int?
+    @State private var showJamSheet = false
     #endif
 
     var body: some View {
@@ -35,6 +36,15 @@ struct QueueView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Auto-extend with Smart Shuffle")
                 .accessibilityValue(container?.playerState.isAutoExtendEnabled == true ? "Enabled" : "Disabled")
+
+                Button {
+                    showJamSheet = true
+                } label: {
+                    Image(systemName: "person.2.wave.2")
+                        .foregroundStyle(container?.jamService.isActive == true ? playingAccent : .secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Jam")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -43,6 +53,7 @@ struct QueueView: View {
 
             queueContent
         }
+        .sheet(isPresented: $showJamSheet) { JamSheet() }
         #else
         // iOS no longer presents QueueView as a sheet — the queue is inline in FullPlayerView via
         // InlineQueueList. QueueView() is only instantiated on macOS now; this branch exists to compile.

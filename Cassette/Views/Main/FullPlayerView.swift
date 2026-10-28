@@ -46,6 +46,7 @@ struct FullPlayerView: View {
     @State private var showLyrics = false
     @State private var surface: PlayerSurface = .player
     @State private var lyricsViewModel: LyricsViewModel?
+    @State private var showJamSheet = false
     @Namespace private var morphNS
 
     #if os(iOS)
@@ -698,7 +699,12 @@ struct FullPlayerView: View {
                       label: "Auto-extend with Smart Shuffle") {
                 Task { await container?.playerService.setAutoExtendEnabled(!playerState.isAutoExtendEnabled) }
             }
+            queuePill(systemImage: "person.2.wave.2", isActive: container?.jamService.isActive == true,
+                      label: "Jam") {
+                showJamSheet = true
+            }
         }
+        .sheet(isPresented: $showJamSheet) { JamSheet() }
     }
 
     private func queuePill(systemImage: String, isActive: Bool, label: LocalizedStringKey, action: @escaping () -> Void) -> some View {

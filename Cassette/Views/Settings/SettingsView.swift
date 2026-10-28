@@ -8,6 +8,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.appContainer) private var container
     @State private var downloadsVM: DownloadsViewModel?
+    @State private var showJamSheet = false
 
     var body: some View {
         Group {
@@ -40,6 +41,7 @@ struct SettingsView: View {
             ReplayGainSettingsSection()
             CrossfadeSettingsSection()
             serverSection()
+            jamSection()
             integrationsSection()
             aboutSection()
             KofiSupportSection()
@@ -71,6 +73,22 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             // TODO(v1.x): multi-server management (add / remove / switch servers)
+        }
+    }
+
+    private func jamSection() -> some View {
+        Section {
+            Button {
+                showJamSheet = true
+            } label: {
+                Label(container?.jamService.isActive == true ? "Jam in progress" : "Start or Join a Jam",
+                      systemImage: "person.2.wave.2")
+            }
+            .sheet(isPresented: $showJamSheet) { JamSheet() }
+        } header: {
+            Text("Jam")
+        } footer: {
+            Text("Listen together: one device plays, friends nearby add songs to its queue.")
         }
     }
 

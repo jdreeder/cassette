@@ -617,7 +617,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Cassette needs to access your camera to take pictures for playlist artworks";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Cassette needs access to your local network to connect to your Navidrome or Subsonic server.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Cassette needs access to your local network to connect to your Navidrome or Subsonic server, and to find and join Jams nearby.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Cassette needs to access your library to upload pictures for playlists";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = NO;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = NO;
@@ -686,7 +686,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Cassette needs to access your camera to take pictures for playlist artworks";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Cassette needs access to your local network to connect to your Navidrome or Subsonic server.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Cassette needs access to your local network to connect to your Navidrome or Subsonic server, and to find and join Jams nearby.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Cassette needs to access your library to upload pictures for playlists";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = NO;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = NO;

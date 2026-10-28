@@ -34,6 +34,7 @@ final class AppContainer {
     let radioService: any RadioServiceProtocol
     let shareService: any ShareServiceProtocol
     let toastService = ToastService()
+    let jamService: JamService
     let networkMonitor = NetworkMonitor()
     let sessionService: PlaybackSessionService
     let dominantColorExtractor = DominantColorExtractor()
@@ -116,7 +117,15 @@ final class AppContainer {
 
         let player = PlayerService(state: playerState, mediaResolver: resolver, serverService: server, sessionService: sessionService, artworkImageCache: artworkImageCache, libraryService: library, audioStreamCache: cache, downloadService: download, cacheSettings: cacheSettings, replayGainSettings: replayGainSettings, crossfadeSettings: crossfadeSettings, toastService: toastService, statsService: stats, listenBrainzService: lb)
         _player = player
-        playerService = player
+        // The Jam gets the unwrapped player: a host queues guests' tracks locally, never back out.
+        let jam = JamService(
+            playerService: player,
+            playerState: playerState,
+            resolveSongs: { [server] ids in await JamService.resolve(ids, with: server) },
+            toastService: toastService
+        )
+        jamService = jam
+        playerService = JamAwarePlayerService(base: player, jam: jam)
 
         let nowPlaying = NowPlayingService(playerService: player, artworkImageCache: artworkImageCache)
         nowPlayingService = nowPlaying
