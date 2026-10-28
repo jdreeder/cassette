@@ -41,6 +41,9 @@ final class AppContainer {
     let artworkImageCache: ArtworkImageCache
     let statsService: StatsService
     private let _player: PlayerService
+    /// The concrete player beneath the Jam router in `playerService`. For wiring and tests only;
+    /// the UI goes through `playerService` so a Jam guest's queue actions reach the host.
+    var corePlayer: PlayerService { _player }
     let wrappedPlaylistService: WrappedPlaylistService
     /// Weekly mood playlists. Always available: AudioMuse powers them when configured, the
     /// server's own tags when not.

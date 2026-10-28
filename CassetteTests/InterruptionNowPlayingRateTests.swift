@@ -60,7 +60,7 @@ private func interruptionBegan() -> Notification {
 /// The container is returned so it outlives the test body.
 private func makePlayer() async throws -> (AppContainer, PlayerService, NowPlayingSpy) {
     let container = try AppContainer(inMemory: true)
-    let player = try #require(container.playerService as? PlayerService)
+    let player = container.corePlayer
     let spy = NowPlayingSpy()
     await player.setNowPlayingService(spy)
     return (container, player, spy)
